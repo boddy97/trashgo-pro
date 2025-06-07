@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>垃圾桶地圖導航</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .layer-panel {
+      display: none;
+      position: absolute;
+      top: 50px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 10px;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      z-index: 5;
+    }
+    .layer-toggle-button {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 6;
+      background: #fff;
+      border: none;
+      padding: 6px 10px;
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <button class="layer-toggle-button" onclick="toggleLayerPanel()">圖層</button>
+
+  <!-- 圖層控制面板 -->
+  <div class="layer-panel" id="layerPanel">
+    <div class="layer-button" data-type="roadmap">
+      <img src="icons/world_map.png" alt="一般" />
+      <span>一般</span>
+    </div>
+    <div class="layer-button" data-type="hybrid">
+      <img src="icons/satellite.png" alt="衛星" />
+      <span>衛星</span>
+    </div>
+    <div class="layer-button" data-type="terrain">
+      <img src="icons/snow_capped_mountain.png" alt="地形" />
+      <span>地形</span>
+    </div>
+    <div class="layer-button toggle" data-layer="traffic">
+      <img src="icons/traffic_light.png" alt="路況" />
+      <span>路況</span>
+    </div>
+    <div class="layer-button toggle" data-layer="transit">
+      <img src="icons/bus.png" alt="大眾運輸" />
+      <span>大眾運輸</span>
+    </div>
+    <div class="layer-button toggle" data-layer="bicycling">
+      <img src="icons/bike.png" alt="騎車" />
+      <span>騎車</span>
+    </div>
+  </div>
+
+  <div id="directionsPanel"></div>
+  <div id="pano"></div>
+
+  <script>
+    let map, userMarker, directionsService, directionsRenderer, streetViewService, panorama;
+    let trafficLayer, transitLayer, bikeLayer;
+    let currentDestination = null;
+    let stepDisplay;
+    let steps = [];
+
+    function toggleLayerPanel() {
+      const panel = document.getElementById('layerPanel');
+      panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+    }
+
+    function calculateAndDisplayRoute(origin, destination) {
+      directionsService.route({ origin, destination, travelMode: 'WALKING' }, (result, status) => {
+        if (status === 'OK') {
+          directionsRenderer.setDirections(result);
+          steps = result.routes[0].legs[0].steps;
+          showStreetViewStep(0);
+        } else {
+          alert('無法規劃路線: ' + status);
+        }
+      });
+    }
+
+    function showStreetViewStep(index) {
+      const step = steps[index];
+      streetViewService.getPanorama({ location: step.start_location, radius: 50 }, (data, status) => {
+        if (status === 'OK') {
+          panorama.setPano(data.location.pano);
+          panorama.setPov({ heading: 270, pitch: 0 });
+          panorama.setVisible(true);
+          stepDisplay.innerHTML = `<strong>第 ${index + 1} 步:</strong> ${step.instructions}`;
+        } else {
+          stepDisplay.innerHTML = `無街景圖可顯示: 第 ${index + 1} 步`;
+        }
+      });
+    }
+
+    function initMap() {
+      map = new google.maps.Map(document.getElementById("map"), {
+        zoom: 15,
+        center: { lat: 25.0330, lng: 121.5654 },
+        mapTypeId: 'roadmap',
+        mapTypeControl: false
+      });
+
+      directionsService = new google.maps.DirectionsService();
+      directionsRenderer = new google.maps.DirectionsRenderer();
+      directionsRenderer.setMap(map);
+      directionsRenderer.setPanel(document.getElementById("directionsPanel"));
+
+      streetViewService = new google.maps.StreetViewService();
+      panorama = new google.maps.StreetViewPanorama(document.getElementById("pano"));
+      map.setStreetView(panorama);
+      stepDisplay = document.getElementById("directionsPanel");
+
+      trafficLayer = new google.maps.TrafficLayer();
+      transitLayer = new google.maps.TransitLayer();
+      bikeLayer = new google.maps.BicyclingLayer();
+
+      fetch("export.geojson")
+        .then(res => res.json())
+        .then(data => {
+          map.data.addGeoJson(data);
+
+          map.data.setStyle({
+            icon: {
+              url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAAA1BMVEX///+nxBvIAAAAAXRSTlMAQObYZgAAAApJREFUGFdjYAAAAAIAAeIhvDMAAAAASUVORK5CYII=",
+              scaledSize: new google.maps.Size(20, 20)
+            },
+            label: {
+              text: "🥵",
+              fontSize: "20px",
+              color: "#000"
+            },
+            title: "垃圾桶"
+          });
+
+          map.data.addListener("click", function (event) {
+            const pos = event.feature.getGeometry().get();
+            if (!userMarker) {
+              alert("尚未定位使用者位置！");
+              return;
+            }
+            currentDestination = pos;
+            calculateAndDisplayRoute(userMarker.getPosition(), currentDestination);
+          });
+        });
+
+      if (navigator.geolocation) {
+        navigator.geolocation.watchPosition((position) => {
+          const pos = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          };
+
+          if (!userMarker) {
+            userMarker = new google.maps.Marker({
+              position: pos,
+              map: map,
+              label: "我"
+            });
+            map.setCenter(pos);
+          } else {
+            userMarker.setPosition(pos);
+          }
+
+          if (currentDestination) {
+            calculateAndDisplayRoute(userMarker.getPosition(), currentDestination);
+          }
+        }, (error) => {
+          alert("無法取得位置: " + error.message);
+        }, {
+          enableHighAccuracy: true,
+          maximumAge: 0,
+          timeout: 10000,
+        });
+      } else {
+        alert("瀏覽器不支援定位");
+      }
+
+      document.querySelectorAll('.layer-button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const type = btn.dataset.type;
+          const layer = btn.dataset.layer;
+
+          if (type) {
+            map.setMapTypeId(type);
+            document.querySelectorAll('.layer-button').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+          }
+
+          if (layer) {
+            const isActive = btn.classList.toggle('active');
+            if (layer === "traffic") isActive ? trafficLayer.setMap(map) : trafficLayer.setMap(null);
+            if (layer === "transit") isActive ? transitLayer.setMap(map) : transitLayer.setMap(null);
+            if (layer === "bicycling") isActive ? bikeLayer.setMap(map) : bikeLayer.setMap(null);
+          }
+        });
+      });
+    }
+  </script>
+
+  <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBdd7wXwXk6QJbBYzpWWP5qU5i1X3tk4rY&callback=initMap"></script>
+</body>
+</html>
+
+
+
+ 
+
+
+
+
