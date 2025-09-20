@@ -6,6 +6,7 @@
   <title>垃圾桶地圖導航</title>
   <link rel="stylesheet" href="style.css" />
   <style>
+    #map { width: 100%; height: 100vh; }
     .layer-panel {
       display: none;
       position: absolute;
@@ -16,6 +17,7 @@
       border-radius: 8px;
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
       z-index: 5;
+      flex-direction: column;
     }
     .layer-toggle-button {
       position: absolute;
@@ -28,6 +30,9 @@
       border-radius: 6px;
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
       cursor: pointer;
+    }
+    .layer-button.active {
+      background: #eee;
     }
   </style>
 </head>
@@ -137,7 +142,7 @@
               scaledSize: new google.maps.Size(20, 20)
             },
             label: {
-              text: "🥵",
+              text: "🚮",
               fontSize: "20px",
               color: "#000"
             },
@@ -155,12 +160,37 @@
           });
         });
 
+      // ====== 改進的定位流程 ======
       if (navigator.geolocation) {
+        // 先嘗試一次立即定位
+        navigator.geolocation.getCurrentPosition((position) => {
+          const pos = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          };
+          console.log("初始定位成功:", pos);
+
+          if (!userMarker) {
+            userMarker = new google.maps.Marker({
+              position: pos,
+              map: map,
+              label: "我"
+            });
+            map.setCenter(pos);
+          }
+        }, handleLocationError, {
+          enableHighAccuracy: true,
+          maximumAge: 0,
+          timeout: 10000,
+        });
+
+        // 持續追蹤位置
         navigator.geolocation.watchPosition((position) => {
           const pos = {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
           };
+          console.log("追蹤到位置:", pos);
 
           if (!userMarker) {
             userMarker = new google.maps.Marker({
@@ -176,9 +206,7 @@
           if (currentDestination) {
             calculateAndDisplayRoute(userMarker.getPosition(), currentDestination);
           }
-        }, (error) => {
-          alert("無法取得位置: " + error.message);
-        }, {
+        }, handleLocationError, {
           enableHighAccuracy: true,
           maximumAge: 0,
           timeout: 10000,
@@ -187,6 +215,7 @@
         alert("瀏覽器不支援定位");
       }
 
+      // ====== 圖層按鈕 ======
       document.querySelectorAll('.layer-button').forEach(btn => {
         btn.addEventListener('click', () => {
           const type = btn.dataset.type;
@@ -207,16 +236,25 @@
         });
       });
     }
+
+    function handleLocationError(error) {
+      switch (error.code) {
+        case error.PERMISSION_DENIED:
+          alert("你拒絕了定位權限，請到瀏覽器設定允許此網站存取位置。");
+          break;
+        case error.POSITION_UNAVAILABLE:
+          alert("目前無法取得位置，可能是裝置或環境限制。");
+          break;
+        case error.TIMEOUT:
+          alert("定位逾時，請再試一次。");
+          break;
+        default:
+          alert("發生未知錯誤，錯誤碼：" + error.code);
+      }
+      console.error("定位錯誤:", error);
+    }
   </script>
 
   <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBdd7wXwXk6QJbBYzpWWP5qU5i1X3tk4rY&callback=initMap"></script>
 </body>
 </html>
-
-
-
- 
-
-
-
-
